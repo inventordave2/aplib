@@ -1,13 +1,16 @@
 /* UNIT TESTS */
 
 
-#include "../stringy/stringy.h"
+#include "./../stringy/stringy.h"
 
+#define APLIB_MAX_NUM_TESTS	512
 static int totalNumTests = 0;
 static char* testmatrix[ 512 ];
-void (*test)()[ 512 ];
+static void* tests[ 512 ];
 
-static int initialise()
+static int initialise();
+
+
 int getTestNumber( char* testname )	{
 
 	int i = 0;
@@ -22,18 +25,27 @@ int getTestNumber( char* testname )	{
 	return i;
 }
 
+
+
 int main( int argc, char** argv )	{
 
 	int testnumber = 0;
 
+	char* testname = NULL;
+
 	if( argc !=1 )	{
-		
-		testnumber = getTestNumber( argv[1] );
+
+		testname = getstring( argv[1] );
+		testnumber = getTestNumber( testname );
 	}
 
 	if( testnumber )	{
 
-		test[testnumber]();
+		if( test[testnumber] != NULL )
+			test[testnumber]();
+		else
+			printf( "Test '%s' has not been registered.", testname );
+
 		goto finish;
 	}
 
@@ -45,6 +57,10 @@ int main( int argc, char** argv )	{
 
 	finish:
 
-	printf( "All tests completed." ), exit(0);
+	#include <stdlib.h>
+	if( testname != NULL )
+		free( testname );
 
+	printf( "All tests completed." );
+	exit(0);
 }
