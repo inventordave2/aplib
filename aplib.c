@@ -290,25 +290,64 @@ static const void* GetPrecisionObject( unsigned long long len )	{
 
 /* 
 
-char* stringy_t.substring( char*, signed long long start, signed long long end );
+*/
+#include <math.h>
+signed long long cmpULL2ap( unsigned long long ull, ap Len )	{
 
-char* substring( char* str, unsigned long long start, unsigned long long end )	{
+	uint8_t d;
+	uint8_t sd;
+	unsigned order = 0;
+	signed long long diff = 0;
+	unsigned i = strlen( Len.wholepart );
 	
-	unsigned long long strlen_str = stringy.strlen( str );
-	char* r = (char*) malloc( 
+	
+	loop:
+	
+	d = Len.wholepart[ i ];
+	d = d - '0';
+	
+	sd = ull % 10;
+
+	if( d!=sd )	{
+
+		
+		diff += (( sd - d ) * pow( 10, order );
+	}
+
+	order += 1;
+	ull -= sd;
+	ull /= 10;
+	i++;
+	
+	if( ull < 10 )	{
+		
+		// final highest-order digit of input value 'ull'.
+		d = Len.wholepart[ i ];
+		d = d - '0';
+		sd = ull % 10;
+
+		if( d!=sd )	{
+
+			diff += (( sd - d ) * pow( 10, order );
+		}
+	}
+	else
+		goto loop;
+	
+	
+	return diff;
 }
 
-*/
 
 static char* clipstring( char* str, ap Len )	{
 
 	char* r;
 	
-	unsigned long long strlen_str = stringy.strlen( str );
+	unsigned long long strlen_str = strlen( str );
 	signed long long diff = 0;
 	if( (diff=cmpULL2ap( strlen_str, Len ))>0 )	{
 		
-		r = stringy.substring( str, 0, diff );
+		r = substring( str, 0, diff );
 	}
 	else
 		r = str;
@@ -346,8 +385,6 @@ static const struct ap NewAP( char* wp, char* fractpart, char sign, unsigned lon
 	
 	return A;
 }
-
-
 
 static const signed short cmpap( ap A, ap B )	{
 	
