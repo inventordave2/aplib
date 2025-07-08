@@ -3,27 +3,53 @@
 #ifndef DAVELIB_APLIB_H
 #define DAVELIB_APLIB_H
 
+#ifdef _cplusplus_
+extern "C"	{
+#endif
+
+
+
 typedef struct ap	{
-	
+
+	const unsigned type; // Integer, Real, Radians, Degrees, etc...
 	const char* wholepart;
 	const char* fractpart;
+
 	const unsigned long long fp; // strlen(wholepart)-1
 	const char sign;
 	const int base;
 	const unsigned long long len;
 	const void* precision;
-	
+
 	/* not const */
 	char desc[1024] = { 0 };
 	void* maxPrecision;
 } ap;
 
 
+typedef struct angle	{
+	
+	const struct ap v;
+	const int type; // radians or degrees, etc
+	
+	bool clockwise = 1;
+	
+} angle;
+
+
 const struct ap AP0;
 const struct ap AP1;
 const struct ap AP2;
+const struct ap AP3;
+
+// AP1_2, AP1_3, AP1_4, AP 1_5, AP3_4, AP4_5, AP2_3, AP1_7, AP2_7, AP22_7
 const struct ap AP10;
 const struct ap AP16;
+const struct ap PI;
+const struct ap e; // Euler's Constant.
+const struct ap GR; // The "Golden Ratio".
+
+
 
 typedef struct circle_t	{
 	
@@ -88,11 +114,11 @@ typedef struct aplib_t {
 	const struct ap (*SimpleAP)( char* val );
 	const struct ap (*NewAP)( char* wholepart, char* fractpart, char sign, unsigned long long Base );
 	const struct ap (*getBase)( ap A );
-	const struct ap (*setSign)( struct ap A, char s );
+	const struct ap (*setSign)( struct ap* A, char s );
 	
-	const struct ap (*setBase)( ap A, unsigned long long Base );
+	const struct ap (*setBase)( ap* A, unsigned long long Base );
 	const struct ap (*getMaxPrecision)( ap A );
-	const struct ap (*setMaxPrecision)( ap A, ap P );
+	const struct ap (*setMaxPrecision)( ap* A, ap P );
 	const struct ap (*getPrecision)( ap A );
 	
 	const struct ap (*add)( const struct ap A, const struct ap B );
@@ -137,5 +163,8 @@ typedef struct aplib_t {
 extern struct aplib_t aplib; 
 extern void InitAPLIB();
 
+#ifdef _cplusplus_
+}
+#endif
 
 #endif
