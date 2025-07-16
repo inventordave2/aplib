@@ -1,0 +1,5 @@
+The half-angle formulas in trigonometry relate the trigonometric functions of an angle to those of half that angle. They are useful for finding exact values of trigonometric functions for angles that are not standard multiples (like 30°, 45°, 60°), or for simplifying expressions. 
+Key Formulas:
+Sine: sin(x/2) = ±√[(1 - cos(x))/2] 
+Cosine: cos(x/2) = ±√[(1 + cos(x))/2] 
+

@@ -1,14 +1,17 @@
 # APLIB Makefile
 
 debug=-g -DDEBUG
+compiler=clang
 
 stringy:
-	make -C ./../stringy stringyd
+	$(compiler) -c -O0 c:\dev\repos\stringy\stringy.c $(debug)  -o stringyd.o
 	
 aplib: ./aplib.c ./aplib.h stringy
-	clang -c $(debug) -O0 -o ./aplib.o ./aplib.c
+	$(compiler) -c $(debug) -O0 -o ./aplib.o ./aplib.c
 
-test:
 units: ./unittests.c ./unittests.h aplib stringy
-	clang $(debug) -o ./test.exe -O0 ./units.c ./aplib.o ./../stringy/stringyd.o
+	$(compiler) $(debug) -o ./test.exe -O0 ./units.c ./aplib.o c:\dev\repos\stringy\stringyd.o
+	
+all: units
+	
 
