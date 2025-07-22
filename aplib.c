@@ -1,27 +1,125 @@
 /* DAVELIB_APLIB_C */
 
+#include <math.h>
+#include <stdlib.h>
 #include "./aplib.h"
+#define apheapblock() (struct ap*)malloc( sizeof(struct ap) )
+#define apscrub(v) {char* _;uint16_t x=0;_=(char*)v;while(x<sizeof(ap))_[x]=0;}
+#define APFLAG_CLEAN 128
+#define VECTOR 0
+#define POINT 1
 
-static struct ap SimpleAP( char* val );
-static struct ap QuickAP( char* val );
-static struct ap NewAP( char* wholepart, char* fractpart, char sign, unsigned long long Base );
+static struct ap* GET_FRESH_APSTRUCT( );
+static void SCRUB_INVALID_APSTRUCT( struct ap* a );
+static const struct PRECISION CALC_PRECISION( struct ap* a )
+static const struct ap* LOCK_APSTRUCT( struct ap* a );
+	
+static struct ap* SimpleAP( char* val );
+static struct ap* QuickAP( char* val );
+static struct ap* NewAP( char* wholepart, char* fractpart, char* sign, int* base );
+static void FreeAP( struct ap* A );
+static int integrity_check( struct ap* a );
+static struct ap* createap( char* wp, char* fp, char* sign, int* base, struct ap* precision, char* desc, unsigned* type );
+static struct ap* add( struct ap* A, struct ap* B ); 
+static struct ap* sub( struct ap* A, struct ap* B );
+static struct ap* mul( struct ap* A, struct ap* B );
+static struct ap* div( struct ap* A, struct ap* B );
+static struct ap* divby2( struct ap* A );
+static struct ap* reciprocal( struct ap* A );
+static struct ap* power( struct ap* A, struct ap* E );
+static signed short cmpdigitstr( char* dstr1, char* dstr2 );
+static struct ap* sqroot( struct ap* A );
+static struct ap* aplog( struct ap* A, int base );
+static struct ap* aplog10( struct ap* A );
+static struct ap* aplog2( struct ap* A );
+static struct ap* aplog16( struct ap* A );
+static struct ap* getMaxPrecision( struct ap* A );
+static struct ap* setMaxPrecision( struct ap* A, struct ap* P );
+static signed short cmpdigitstr( char* dstr1, char* dstr2 );
+static signed short cmpap( struct ap* A, struct ap* B );
+static struct ap* diff( struct ap* A, struct ap* B );
+static struct vector_t vec( struct ap* t, struct ap* x, struct ap* y, struct ap* z, struct ap* k );
+static struct point_t point( struct ap* t, struct ap* x, struct ap* y, struct ap* z, struct ap* k );
+static struct circle_t circle( struct point_t* origin, struct ap* radius, struct vector_t* momentum, struct ap** segments );
 
-static void FreeAP( ap A );
+static struct ap* createap( char* wp, char* fp, char* sign, int* base, struct ap* precision, char* desc, unsigned* type )	{
 
-/*
-The core virtual arithmetic operators. When the aplib library is deployed with a C++ wrapper, these are the functions that will be mapped
-to the native operator primitives '+', '-', '*', and '/' via the C++ scope operator overloading semantics.
-
-
-operator+( ap A, ap B )	{ return aplib.add( A,B ); }
-operator-( ap A, ap B ) { return aplib.sub( A,B ); }
-operator*( ap A, ap B ) { return aplib.mul( A,B ); }
-operator/( ap A, ap B ) {
-
-	if( (!aplib.cmpdigitstr( "2", B.wholepart )) && (!aplib.cmpdigitstr( "0", B.fractpart )) )
-		return aplib.divby2( A );
+	struct ap* a = (struct ap*) malloc( sizeof( struct ap ) );
+	
+	unsigned long long x = 0;
+	while( wp[x]=='0' )
+		x++;
+	
+	a->wholepart = stringy->substring( wp, x, stringy->strlen(wp) );
+	
+	x = stringy->strlen( fp )-1;
+	while( fp[x]=='0' )
+		x--;
+	
+	a->fractpart = stringy->substring( fp, 0, x );
+	
+	a->sign = *sign;
+	
+	if( *base==2 ||
+		*base==8 ||
+		*base==10 ||
+		*base==16 )
+		a->base = *base;
 	else
-		return aplib.div( A,B );
+		a->base = 0;
+	
+	a->desc = desc;
+	
+	if( type!=NULL )
+		a->type = *type;
+	
+	struct ap* p;
+	if( precision!=NULL )
+		p = (struct ap*) precision;
+	
+	a->precision = (void*) p;
+	
+	a->c = 0 | APFLAG_CLEAN;
+	
+	return a;
+}
+
+static int integrity_check( struct ap* a )	{
+
+	if( a->c && APFLAG_CLEAN )
+		return 1;
+
+	unsigned long long w = 0;
+	while( a->wp[w]=='0' )
+		w++;
+
+	unsigned long long wp_len = stringy->strlen( a->wp );
+	unsigned long long fp_len = stringy->strlen( a->fp );
+	unsigned long long f = fp_len - 1;
+	while( a->fp[f]=='0' )
+		f++;
+
+	a->w = w;
+	a->f = f;
+
+	if( a->sign != '-' && a->sign != '+' )
+		a->sign = '+';
+	
+	if( 	a->base != 2 &&
+		a->base != 8 &&
+		a->base != 10 &&
+		a->base != 16 )
+		a->base = 10;
+
+	a->len = wp_len+fp_len;
+	a->fp  = wp_len - 1;
+
+	if( a->precision )
+		integrity_check( (struct ap*) a->precision );
+
+	a->c = a->c & APFLAG_CLEAN;
+
+	return 1;
 }
 
 static signed short cmpdigitstr( char* dstr1, char* dstr2 )	{
@@ -86,26 +184,23 @@ static signed short cmpdigitstr( char* dstr1, char* dstr2 )	{
 	
 	return 0;
 }
+/**
 
+When generating a result row array, if MSD(A) + MSD(B) + 1 would not equal more than 9,
+no need for extra overflow digit slot. If MSD(A) + MSD(B), or that and an additional +1 would be >= 10,
+need the additional digit.
 
+Length(resultrow[]) ADD: length( max(A,B) ) (might also need to +1
+					MUL: length( A ) + length( B )
+					
+					DIV: length( A ) + nonstatic amount for fractional digits. Rserving DIV fractional blocks in a block of length(A) digits at a time
 */
-static struct ap add( struct ap A, struct ap B );
-static struct ap sub( struct ap A, struct ap B );
-static struct ap mul( struct ap A, struct ap B );
-static struct ap div( struct ap A, struct ap B );
-static struct ap divby2( struct ap A );
-
-
-static struct ap reciprocal( struct ap A );
-static struct ap power( struct ap A, struct ap E );
-
-
 
 /*
 The Newton's Method root approximation functions. Only 'ap sqroot(ap)' is exposed via the aplib_t interface. The others are used by the
 algorithm internally (by the core 'sqroot' function), they are implementation details that do not need to be directly-accessed by the User. 
 */
-static struct ap sqrt_f( struct ap v )	{
+static struct ap* sqrt_f( struct ap* v )	{
 	
 	ap x2 = mul( v,v );
 	ap x2_2 = sub( x2, AP2 );
@@ -113,59 +208,37 @@ static struct ap sqrt_f( struct ap v )	{
 	FreeAP( x2 );
 	return x2_2;
 }
-static struct ap sqrt_deriv_f( struct ap v )	{
+static struct ap* sqrt_deriv_f( struct ap* v )	{
 
 	return mul( v,AP2 );
 }
 
-
-static struct ap sqroot( struct ap A );
-
-
-static struct ap aplog( struct ap A, unsigned long long Base );
-static struct ap aplog10( struct ap A );
-static struct ap aplog2( struct ap A );
-static struct ap aplog16( struct ap A );
-static struct ap getMaxPrecision( struct ap A );
-static struct ap setMaxPrecision( struct ap A, struct ap P );
-
-
-
-static signed short cmpdigitstr( char* dstr1, char* dstr2 );
-static signed short cmpap( ap A, ap B );
-static struct ap diff( ap A, ap B );
-
-static struct vector_t vec( struct ap* t, struct ap* x, struct ap* y, struct ap* z, struct ap* k );
-static struct point_t point( struct ap* t, struct ap* x, struct ap* y, struct ap* z, struct ap* k );
-
-static struct circle_t circle( struct point_t* origin, struct ap* radius, struct vector_t* momentum, struct ap** segments );
-
-static signed short cmpap( ap A, ap B )	{
+static signed short cmpap( struct ap* A, struct ap* B )	{
 	
 	return 0;
 }
 
-static struct ap sqroot( struct ap A )	{
+static const struct ap* sqroot( struct ap* A )	{
 	
-	ap x0 = div( A,AP2 );
+	struct ap* x0 = div( A,AP2 );
 	
-	ap epsilon = QuickAP( "0.0000000001" );
-	ap tolerance = QuickAP( "0.000001" );
+	struct ap* epsilon = QuickAP( "0.0000000001" );
+	struct ap* tolerance = QuickAP( "0.000001" );
 
 	uint64_t max_iterations = 20;
 	
 	while( max_iterations-- )	{
 		
-		ap y = sqrt_f( x0 );
-		ap yprime = sqrt_deriv_f( x0 );
+		struct ap* y = sqrt_f( x0 );
+		struct ap* yprime = sqrt_deriv_f( x0 );
 		
 		if( cmpap( yprime,epsilon ) < 0 )
 			break;
 		
-		ap x1 = div( y,yprime );
-		ap x1_b = sub( x0,x1 );
+		struct ap* x1 = div( y,yprime );
+		struct ap* x1_b = sub( x0,x1 );
 
-		ap x1_c = sub( x1_b,x0 );
+		struct ap* x1_c = sub( x1_b,x0 );
 		
 		FreeAP( x1 );
 		FreeAP( x1_b );
@@ -173,13 +246,13 @@ static struct ap sqroot( struct ap A )	{
 		FreeAP( yprime );
 
 		if( cmpap( x1_c,tolerance ) < 1 )
-			return x1_c;
+			return (const struct ap*) x1_c;
 		
 		FreeAP( x0 );
 		x0 = x1_c;
 	}
 	
-	return copyap( AP0 );
+	return (const struct ap*) copyap( &AP0 );
 }
 
 static struct circle_t circle( struct point_t* origin, struct ap* radius, struct vector_t* momentum, struct ap** segments )	{
@@ -198,7 +271,6 @@ static struct circle_t circle( struct point_t* origin, struct ap* radius, struct
 	
 	c.segments = segments;
 }
-
 static struct vector_t vec( struct ap* t, struct ap* x, struct ap* y, struct ap* z, struct ap* k )	{
 	
 	// simply pass AP0, or NULL, for any param that is targeted to be 0.
@@ -228,10 +300,10 @@ static struct vector_t vec( struct ap* t, struct ap* x, struct ap* y, struct ap*
 	return (struct vector_t) new_vector;
 }
 
-static struct point_t point( struct ap* t, struct ap* x, struct ap* y, struct ap* z, struct ap* k )	{
+static struct vector_t point( struct ap* t, struct ap* x, struct ap* y, struct ap* z, struct ap* k )	{
 	
 	// simply pass AP0, or NULL, for any param that is targeted to be 0.
-	struct point_t new_point;
+	struct vector_t new_point;
 
 	if( t==NULL )
 		t = (struct ap*)&AP0;
@@ -253,15 +325,14 @@ static struct point_t point( struct ap* t, struct ap* x, struct ap* y, struct ap
 	new_point.y = *y;
 	new_point.z = *z;
 	new_point.k = *k;
-	
-	return (struct point_t) new_point;
+	new_point.type = POINT;
+	return (struct vector_t) new_point;
 }
 
 static struct ap diff( ap A, ap B )	{
 
 	return sub( A,B );
 }
-
 
 static struct ap setMaxPrecision( struct ap A, struct ap P )	{
 
@@ -335,10 +406,6 @@ static void* GetPrecisionObject( unsigned long long len )	{
 	return (void*) P;
 }
 
-/* 
-
-*/
-#include <math.h>
 signed long long cmpULL2ap( unsigned long long ull, ap Len )	{
 
 	uint8_t d;
@@ -401,13 +468,13 @@ static char* clipstring( char* str, ap Len )	{
 	return r;
 }
 
-static struct ap QuickAP( char* val )	{
+static struct ap* QuickAP( char* val )	{
 
-	struct ap A;
-	A.sign = '+'';
-	A.base = 10;
-	A.wholepart = NULL;
-	A.fractpart = NULL;
+	struct ap* A = (struct ap*) malloc( sizeof( struct ap ) );
+	A->sign = '+'';
+	A->base = 10;
+	A->wholepart = NULL;
+	A->fractpart = NULL;
 	
 	unsigned long long x = 0;
 	unsigned long long y = 0;
@@ -416,33 +483,32 @@ static struct ap QuickAP( char* val )	{
 	while( val[x] )	{
 		
 		if( val[x]=='.' )
-			A.wholepart = (char*)malloc( x + 1 ), z=x;
+			A->wholepart = (char*)malloc( x + 1 ), z=x;
 		
 		x++;
 	}
 	
-	if( A.wholepart==NULL )
-		A.wholepart = getstring( val ), A.fractpart = getstring( "0" );
+	if( A->wholepart==NULL )
+		A->wholepart = getstring( val ), A->fractpart = getstring( "0" );
 	else	{
 		
 		while( y<z )
-			A.wholepart[y] = val[y++];
+			A->wholepart[y] = val[y++];
 		
-		A.wholepart[y] = '\0';
+		A->wholepart[y] = '\0';
 
-		A.fractpart = (char*)malloc( (x-z) + 1 );
+		A->fractpart = (char*)malloc( (x-z) + 1 );
 		z=0;
 		while( val[y] )
-			A.fractpart[z++] = val[y++];
+			A->fractpart[z++] = val[y++];
 		
-		A.fractpart[z] = '\0';
+		A->fractpart[z] = '\0';
 	}
 		
-	return (struct ap) A;
-	
+	return A;
 }
 
-static struct ap SimpleAP( char* val )	{
+static struct ap* SimpleAP( char* val )	{
 	
 	struct ap A;
 	A.maxPrecision = aplib.precision;
@@ -462,18 +528,144 @@ static struct ap SimpleAP( char* val )	{
 	return A;
 }
 
-static struct ap NewAP( char* wp, char* fractpart, char sign, unsigned long long Base )	{
+static struct ap* NewAP( char* wp, char* fractpart, char* sign, int* base, struct ap* precision ) {
 	
-	struct ap A;
-	A.wp = wp;
-	A.fractpart = fractpart;
-	A.sign = sign;
-	A.base = Base;
+	struct ap* a = (struct ap*) malloc( sizeof( struct ap ) );
 	
-	return A;
+	a->wholepart = wp;
+	a->fractpart = fractpart;
+	
+	a->sign = *sign;
+	a->base = *base;
+	a->precision = precision;
+	
+	return a;
+};
+
+static struct ap* add( struct ap* A, struct ap* B )	{
+
 }
 
-static signed short cmpap( ap A, ap B )	{
+const struct ap* COPY_APSTRUCT( struct ap* a )	{
+
+	struct ap* b;
+	
+	b->wholepart 	= a->wholepart;
+	b->fractpart 	= a->fractpart;
+	b->wp_len    	= a->wp_len;
+	b->fp_len		= a->fp_len;
+	b->base			= a->base;
+	b->sign			= a->sign;
+	
+	
+	return (const struct ap*) b;
+}
+
+static struct ap* GET_FRESH_APSTRUCT( )	{
+
+	return apheapblock();
+}
+
+static void SCRUB_INVALID_APSTRUCT( struct ap* a )	{
+
+	uint16_t size_ap = sizeof( struct ap );
+	uint16_t x = 0;
+	
+	char* _ = (char*) a;
+	
+	while( x<size_ap )
+		_[a] = 0, x++;
+	
+	return;
+}
+
+static const struct ap* LOCK_APSTRUCT( struct ap* a )	{
+
+	struct ap* b = GET_FRESH_APSTRUCT();
+
+	uint8_t t = 0;
+	
+	
+	if( a->wholepart != NULL )	{
+		
+		t += 1;
+		b->wholepart = a->wholepart;
+		b->wp_len = GET_DS_LENGTH( a->wholepart );
+	}
+	
+	if( a->fractpart != NULL )	{
+		
+		t += 1;
+		b->fractpart = a->fractpart;
+		b->fp_len = GET_DS_LENGTH( b->fractpart );
+	}
+	
+	if( t==0 )	{
+		
+		SCRUB_INVALID_APSTRUCT( a );
+		return (const struct ap*)NULL;
+	}
+
+
+	if( a->sign != '-' )
+		b->sign = '+';
+	else
+		b->sign = '-';
+	
+	if( a->base == 0 )
+		b->base = 10;
+	else
+		b->base = a->base;
+	
+	if( a->precision==0 )
+		b->precision = CALC_PRECISION( a );
+	else
+		b->precision = a->precision;
+	
+	SCRUB_INVALID_APSTRUCT( a );
+	
+	return (const struct ap*) b;
+}
+
+static const struct PRECISION CALC_PRECISION( struct ap* a )	{
+
+	struct PRECISION P;
+	
+	P.WP_PREC = a->wp_len;
+	P.FP_PREC = a->fp_len;
+	
+	return (const struct PRECISION) P;
+}	
+
+static struct ap* verify_ap( struct ap* A )	{
+	
+	unsigned long long len_A_wp, len_A_fp, len_B_wp, len_B_fp;
+	len_A_wp = stringy->strlen( A->wholepart );
+	len_A_fp = stringy->strlen( A->fractpart );
+	len_B_wp = stringy->strlen( B->wholepart );
+	len_B_fp = stringy->strlen( B->fractpart );
+
+	unsigned long long A_fp, B_fp;
+	A_fp = A->fp; B_fp = B->fp;
+
+	unsigned long long wA = 0;
+	unsigned long long fA = 0;
+	
+	while( A->wholepart[wA]=='0' )
+		wA++;
+	
+	fA = len_A_fp - 1;
+	while( A->fractpart[fA]=='0' )
+		fA--;
+	
+	if( wA>0 )
+		len_A_wp -= wA, A->w = w, A->fp = len_A_wp-1;
+	
+	if( fA>0 )
+		len_A_fp -= fA, A->f = f;
+}
+
+static signed short cmpap( ap* A, ap* B )	{
 	
 	signed short t = cmpdstr( A.wholepart, B.wholepart );
 	
@@ -485,95 +677,93 @@ static signed short cmpap( ap A, ap B )	{
 	return t;
 }
 
-
 #define NEGATIVE '-'
 #define POSITIVE '+'
 void InitAPLIB()	{
 
-	aplib.simpleap = SimpleAP;
+	aplib = (struct aplib_t*) malloc( sizeof(struct aplib_t) );
+	aplib->simpleap = SimpleAP;
 
-	aplib.add = add;
-	aplib.sub = sub;
-	aplib.mul = mul;
-	aplib.div = div;
-	aplib.divby2 = divby2;
+	aplib->add = add;
+	aplib->sub = sub;
+	aplib->mul = mul;
+	aplib->div = div;
+	aplib->divby2 = divby2;
 	
-	aplib.reciprocal = reciprocal;
-	aplib.power = power;
-	aplib.sqrt = sqroot;
-	aplib.log10 = log10;
-	aplib.log2 = log2;
-	aplib.log16 = log16;
-	aplib.log = log;
+	aplib->reciprocal = reciprocal;
+	aplib->power = power;
+	aplib->sqrt = sqroot;
+	aplib->log10 = log10;
+	aplib->log2 = log2;
+	aplib->log16 = log16;
+	aplib->log = log;
 	
-	aplib.cmpdstr = cmpdstr;
-	aplib.diff = diff;
-	aplib.cmpap = cmpap;
+	aplib->cmpdstr = cmpdstr;
+	aplib->diff = diff;
+	aplib->cmpap = cmpap;
 	
-	aplib.vec = vec;
-	aplib.circle = circle;
-	aplib.triangulate = triangulate;
+	aplib->vec = vec;
+	aplib->circle = circle;
+	aplib->triangulate = triangulate;
 
-	AP0.wholepart = getstring( "0" );
-	AP0.fractpart = getstring( "0" );
-	AP0.sign = POSITIVE;
-	AP0.base = 10;
+	AP0 = (struct ap*)malloc( sizeof(struct ap) );
+	AP0->wholepart = getstring( "0" );
+	AP0->fractpart = getstring( "0" );
+	AP0->sign = POSITIVE;
+	AP0->base = 10;
 	
-	AP1.wholepart = getstring( "1" );
-	AP1.fractpart = getstring( "0" );
-	AP1.sign = POSITIVE;
-	AP1.base = 10;
+	AP1 = (struct ap*)malloc( sizeof(struct ap) );
+	AP1->wholepart = getstring( "1" );
+	AP1->fractpart = getstring( "0" );
+	AP1->sign = POSITIVE;
+	AP1->base = 10;
 
-	AP2.wholepart = getstring( "2" );
-	AP2.fractpart = getstring( "0" );
-	AP2.sign = POSITIVE;
-	AP2.base = 10;
+	#define apheapblock() (struct ap*)malloc( sizeof(struct ap) )
+	
+	
+	AP2 = (struct ap*)malloc( sizeof(struct ap) );
+	AP2->wholepart = getstring( "2" );
+	AP2->fractpart = getstring( "0" );
+	AP2->sign = POSITIVE;
+	AP2->base = 10;
 
-	AP10.wholepart = getstring( "10" );
-	AP10.fractpart = getstring( "0" );
-	AP10.sign = POSITIVE;
-	AP10.base = 10;
+	AP10 = apheapblock();
+	AP10->wholepart = getstring( "10" );
+	AP10->fractpart = getstring( "0" );
+	AP10->sign = POSITIVE;
+	AP10->base = 10;
 	
-	AP16.wholepart = getstring( "16" );
-	AP16.fractpart = getstring( "0" );
-	AP16.sign = POSITIVE;
-	AP16.base = 10;
+	AP16 = apheapblock();
+	AP16->wholepart = getstring( "16" );
+	AP16->fractpart = getstring( "0" );
+	AP16->sign = POSITIVE;
+	AP16->base = 10;
 	
-	void* prec_copy = aplib.precision;
-	aplib.precision = (void*)&(SimpleAP( "1024" ));
-	APSQRT2 = aplib.sqrt( AP2 );
-	aplib.FreeAP( (struct ap*)aplib.precision );
-	aplib.precision = prec_copy;
+	void* prec_copy = aplib->precision;
+	
+	aplib->precision = (void*) SimpleAP( "1024" );
+	APSQRT2 = aplib->sqroot( AP2 );
+	aplib->FreeAP( (struct ap*)aplib->precision );
+
+	aplib->precision = prec_copy;
 }
 
 /*
 The SQROOT functions, implementing Isaac Newton's Method for converging-approximations of roots.
 Not fully implemented yet.
 */
-static struct ap sqrt_f( struct ap A )	{
+static struct ap* sqrt_f( struct ap* A )	{
 	
-	struct ap r = mul( A,A );
-	struct ap r2 = sub( r, AP2 );
+	struct ap* r = mul( A,A );
+	struct ap* r2 = sub( r, AP2 );
 	
-	aplib.FreeAP( &r );
+	aplib->FreeAP( r );
 	
 	return r2;
 }
+static struct ap* sqrt_deriv_f( struct ap* A )	{
 
-static struct ap sqrt_deriv_f( struct ap A )	{
-
-	struct ap result;
-	// ....
-	
+	struct ap* result = mul( A,AP2 );
 	return result;
-}
-
-static struct ap sqroot( struct ap A )	{
-	
-	struct ap A;
-	
-	// ....
-	
-	return A;
 }
 
